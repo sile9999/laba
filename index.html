@@ -221,6 +221,17 @@
       padding: 10px;
       text-align: center;
     }
+    .scratch-turtle-prize {
+      font-size: 110px !important;
+      line-height: 1 !important;
+      font-weight: 900 !important;
+      margin: 0 !important;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+    }
     .scratch-canvas {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
@@ -602,6 +613,17 @@
 
         if (eventEndTimeMs && Date.now() >= eventEndTimeMs) {
           showEventEndedView();
+          return;
+        }
+
+        // 限制同一活動內玩家暱稱不可重複。
+        // 比對時使用 trim() 後的結果，避免前後空白造成看似不同的暱稱。
+        const existingScores = data.scores || {};
+        const duplicatedName = Object.values(existingScores).some(
+          p => String(p && p.name || '').trim() === inputName
+        );
+        if (duplicatedName) {
+          alert('⚠️ 這個暱稱已經有人使用，請換一個暱稱！');
           return;
         }
 
@@ -1201,7 +1223,7 @@
         <div class="scratch-card-box">
           <div class="scratch-prize-layer">
             ${chosenObj.img ? `<img src="${chosenObj.img}" style="max-height:80px; max-width:100px; object-fit:contain; margin-bottom:2px;" alt="獎品圖">` : ''}
-            <div id="prize-text-display" style="font-size: 15px; color: #713f12; font-weight:900;">${chosenObj.name}</div>
+            <div id="prize-text-display" class="${chosenObj.name === '🐢' ? 'scratch-turtle-prize' : ''}" style="${chosenObj.name === '🐢' ? '' : 'font-size: 15px; color: #713f12; font-weight:900;'}">${chosenObj.name}</div>
           </div>
           <canvas id="scratch-canvas" class="scratch-canvas"></canvas>
         </div>
