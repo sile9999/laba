@@ -698,7 +698,7 @@
     function copyEventLink(btn) {
       if (!eventId) return;
       const fullLink = `${window.location.origin}${window.location.pathname}?event=${eventId}`;
-      navigator.clipboard.writeText(`🎮 花奶奶小物大挑戰\n🔗 連結：${fullLink}\n⏱️時間：\n📍 代號：${eventId}\n📓 備註：`).then(() => {
+      navigator.clipboard.writeText(`🎮 花奶奶小物大挑戰\n🔗 連結：${fullLink}\n⏱️時間：\n📍  代號：${eventId}\n📓 備註：`).then(() => {
         triggerButtonFeedback(btn, '✅ 已複製連結！', '📋 複製活動連結');
       });
     }
@@ -712,7 +712,7 @@
         return (a.totalTime ?? 999999) - (b.totalTime ?? 999999);
       });
       let text = `🏆【綜合益智大挑戰排行榜】\n`;
-      sorted.forEach((p, idx) => { text += `第 ${idx + 1} 名: @${p.name} - 花費 ${p.totalTime || 0} 秒 ${p.prize ? ` [獎項: ${p.prize}]` : ''}\n`; });
+      sorted.forEach((p, idx) => { text += `第 ${idx + 1} 名: @${p.name} - ${p.totalTime || 0} 秒 ${p.prize ? ` [${p.prize}]` : ''}\n`; });
       navigator.clipboard.writeText(text).then(() => {
         triggerButtonFeedback(btn, '✅ 已複製戰報！', '🏆 複製排行榜成績');
       });
@@ -802,6 +802,7 @@
       currentPassCount = 0;
       totalElapsedTimeSec = 0;
       earnedPrizeText = '';
+      isCompletingSubGameTask = false;
       gameStartTimeMs = Date.now();
       updateScoreToFirebase();
 
@@ -1578,6 +1579,7 @@
     }
 
     async function startScratchCardGame() {
+      if (!isGameActive) return;
       if (mainTimer) clearInterval(mainTimer);
       document.getElementById('slot-section').classList.add('hidden');
       const gameplaySection = document.getElementById('gameplay-section');
@@ -1682,17 +1684,39 @@
       });
     }
 
-    function completeSubGameTask() {
+    let isCompletingSubGameTask = false;
+
+    async function completeSubGameTask() {
+      // 防止同一關因快速點擊、重複事件或非同步切換而被完成多次。
+      if (!isGameActive || isCompletingSubGameTask) return;
+      isCompletingSubGameTask = true;
+
       speakText('過關');
 
       currentPassCount++;
       document.getElementById('current-pass-display').innerText = currentPassCount;
-      updateScoreToFirebase();
 
-      if (currentPassCount >= targetPassCount) {
-        startScratchCardGame();
-      } else {
-        showSlotMachineView();
+      try {
+        // 先完成通關紀錄，再進入下一個畫面，避免 Firebase onValue
+        // 的即時回寫與最後一關的畫面切換互相競速。
+        await updateScoreToFirebase();
+
+        if (!isGameActive) return;
+
+        if (currentPassCount >= targetPassCount) {
+          // 最後一關：必須等待刮刮樂初始化完成，不能讓非同步函式在背景執行。
+          await startScratchCardGame();
+        } else {
+          showSlotMachineView();
+        }
+      } catch (error) {
+        console.error('進入下一關失敗：', error);
+        if (isGameActive) {
+          showSlotMachineView();
+          alert('⚠️ 關卡切換失敗，請重新開始挑戰。');
+        }
+      } finally {
+        isCompletingSubGameTask = false;
       }
     }
 
