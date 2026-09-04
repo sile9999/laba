@@ -352,6 +352,39 @@
 
     const subGames = ['撲克牌對對碰', '賓果連線賽', '打地鼠'];
 
+    // 檢查活動是否已經結束（時間到 或 全部獎項已抽出）
+    function checkEventEndedCondition(evData) {
+      if (!evData) return false;
+      const endTime = evData.endTime || 0;
+      const isTimeUp = endTime && Date.now() >= endTime;
+
+      // 計算是否全部獎項已抽出
+      let allPrizesTaken = false;
+      if (evData.gameConfigs && evData.gameConfigs.scratch) {
+        const scratchCfg = evData.gameConfigs.scratch;
+        const totalCount = scratchCfg.totalCount || 10;
+        const scores = evData.scores || {};
+        
+        let takenCount = 0;
+        Object.values(scores).forEach(p => {
+          if (p && p.prize && p.prize !== '尚未刮獎' && p.prize !== '🐢') {
+            takenCount++;
+          }
+        });
+
+        // 如果已抽出的非龜獎項數量大於或等於設定的總真實獎品數，視為獎項已全數抽完
+        let totalRealPrizeQty = 0;
+        if (scratchCfg.prizes) {
+          scratchCfg.prizes.forEach(p => { totalRealPrizeQty += (p.qty || 1); });
+        }
+        if (totalRealPrizeQty > 0 && takenCount >= totalRealPrizeQty) {
+          allPrizesTaken = true;
+        }
+      }
+
+      return isTimeUp || allPrizesTaken;
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       document.getElementById('admin-unlock-btn').addEventListener('click', openAdminModal);
       document.getElementById('pwd-check-btn').addEventListener('click', checkPassword);
@@ -404,7 +437,7 @@
             return;
           }
           const data = snapshot.val();
-          if ((data.endTime && Date.now() >= data.endTime) || data.isEnded) {
+          if (checkEventEndedCondition(data)) {
             showEventEndedView();
             return;
           }
@@ -433,6 +466,7 @@
         container.appendChild(row);
       });
 
+      // 繫結輸入事件與刪除事件
       container.querySelectorAll('input').forEach(input => {
         input.addEventListener('input', (e) => {
           const idx = parseInt(e.target.dataset.idx);
@@ -517,6 +551,7 @@
       const customVal = parseInt(document.getElementById('custom-pass-input').value);
       if (!isNaN(customVal) && customVal >= 1) targetPassCount = customVal;
 
+      // 讀取自訂刮刮樂總張數輸入框的值
       const customTotalCountInput = document.getElementById('custom-scratch-total-input').value.trim();
       if (customTotalCountInput !== '') {
         const parsedCount = parseInt(customTotalCountInput);
@@ -542,7 +577,6 @@
       set(eventRef, {
         targetPassCount: targetPassCount,
         endTime: calculatedEndTimeMs,
-        isEnded: false,
         gameConfigs: gameConfigs,
         globalCallList: initialCallList,
         scores: {}
@@ -557,9 +591,6 @@
         if (!data) return;
         currentLeaderboard = data.scores || {};
         renderLeaderboard('admin-leaderboard-list', currentLeaderboard);
-        if (data.isEnded || (data.endTime && Date.now() >= data.endTime)) {
-          showEventEndedView();
-        }
       });
     }
 
@@ -580,7 +611,7 @@
         return (a.totalTime ?? 999999) - (b.totalTime ?? 999999);
       });
       let text = `🏆【綜合益智大挑戰排行榜】\n`;
-      sorted.forEach((p, idx) => { text += `第 ${idx + 1} 名: @${p.name} - 通關 ${p.passes || 0}次 ${p.prize ? ` [獎項: ${p.prize}]` : ''}\n`; });
+      sorted.forEach((p, idx) => { text += `第 ${idx + 1} 名: @${p.name} - 花費 ${p.totalTime || 0} 秒 ${p.prize ? ` [獎項: ${p.prize}]` : ''}\n`; });
       navigator.clipboard.writeText(text).then(() => {
         triggerButtonFeedback(btn, '✅ 已複製戰報！', '🏆 複製排行榜成績');
       });
@@ -613,11 +644,12 @@
         const data = snapshot.val();
         eventEndTimeMs = data.endTime || 0;
 
-        if ((eventEndTimeMs && Date.now() >= eventEndTimeMs) || data.isEnded) {
+        if (checkEventEndedCondition(data)) {
           showEventEndedView();
           return;
         }
 
+        // 限制同一活動內玩家暱稱不可重複。
         const existingScores = data.scores || {};
         const duplicatedName = Object.values(existingScores).some(
           p => String(p && p.name || '').trim() === inputName
@@ -638,8 +670,8 @@
         onValue(eventRef, (snap) => {
           const evData = snap.val();
           if (evData) {
-            if (evData.isEnded || (evData.endTime && Date.now() >= evData.endTime)) {
-              showEventEndedView();
+            if (checkEventEndedCondition(evData)) {
+              endPersonalGame(true);
               return;
             }
             renderLeaderboard('player-leaderboard-list', evData.scores || {});
@@ -652,17 +684,15 @@
       });
     }
 
-    function updateScoreToFirebase(extraData = {}) {
+    function updateScoreToFirebase() {
       if (!eventId || !playerId) return;
-      const payload = {
+      update(ref(db, `events_v1/${eventId}/scores/${playerId}`), {
         name: playerName,
         passes: currentPassCount,
         totalTime: totalElapsedTimeSec,
         prize: earnedPrizeText || '尚未刮獎',
-        timestamp: Date.now(),
-        ...extraData
-      };
-      update(ref(db, `events_v1/${eventId}/scores/${playerId}`), payload);
+        timestamp: Date.now()
+      });
     }
 
     function startPersonalGame() {
@@ -1199,161 +1229,111 @@
       const gameplaySection = document.getElementById('gameplay-section');
       gameplaySection.classList.remove('hidden');
 
-      // 從 Firebase 即時取得目前最新的所有玩家得分狀況，以精確計算已領取的獎項數量
-      get(ref(db, `events_v1/${eventId}`)).then((snapshot) => {
-        let currentScores = {};
-        if (snapshot.exists()) {
-          const evData = snapshot.val();
-          currentScores = evData.scores || {};
-        }
+      // 產生基於總張數與獎項數量的刮刮樂池
+      let scratchPool = [];
+      const scratchCfg = gameConfigs.scratch || { totalCount: 10, prizes: [] };
+      let assignedCount = 0;
 
-        let scratchPool = [];
-        const scratchCfg = gameConfigs.scratch || { totalCount: 10, prizes: [] };
-
-        if (scratchCfg.prizes && scratchCfg.prizes.length > 0) {
-          scratchCfg.prizes.forEach(p => {
-            let q = p.qty || 1;
-            for (let i = 0; i < q; i++) {
-              scratchPool.push({ name: p.name, img: p.img || '' });
-            }
-          });
-        }
-
-        let totalCount = scratchCfg.totalCount || 10;
-        while (scratchPool.length < totalCount) {
-          scratchPool.push({ name: '🐢', img: '' });
-        }
-
-        // 統計目前已被其他玩家領走的非 🐢 獎項清單
-        let claimedPrizesCount = 0;
-        Object.values(currentScores).forEach(p => {
-          if (p && p.prize && p.prize !== '尚未刮獎' && p.prize !== '🐢') {
-            claimedPrizesCount++;
+      if (scratchCfg.prizes && scratchCfg.prizes.length > 0) {
+        scratchCfg.prizes.forEach(p => {
+          let q = p.qty || 1;
+          for (let i = 0; i < q; i++) {
+            scratchPool.push({ name: p.name, img: p.img || '' });
+            assignedCount++;
           }
         });
+      }
 
-        // 洗牌並依照剩餘或既有配置抽取
-        shuffleArray(scratchPool);
-        const chosenObj = scratchPool[0];
+      // 如果總張數大於獎項數量，其餘未中獎的以🐢替代
+      let totalCount = scratchCfg.totalCount || 10;
+      while (scratchPool.length < totalCount) {
+        scratchPool.push({ name: '🐢', img: '' });
+      }
 
-        gameplaySection.innerHTML = `
-          <div style="font-size:14px; font-weight:bold; color:#38bdf8; margin-bottom:8px;">🎟️ 幸運刮刮樂挑戰</div>
-          <div class="scratch-card-box">
-            <div class="scratch-prize-layer">
-              ${chosenObj.img ? `<img src="${chosenObj.img}" style="max-height:80px; max-width:100px; object-fit:contain; margin-bottom:2px;" alt="獎品圖">` : ''}
-              <div id="prize-text-display" class="${chosenObj.name === '🐢' ? 'scratch-turtle-prize' : ''}" style="${chosenObj.name === '🐢' ? '' : 'font-size: 15px; color: #713f12; font-weight:900;'}">${chosenObj.name}</div>
-            </div>
-            <canvas id="scratch-canvas" class="scratch-canvas"></canvas>
+      // 隨機抽出一張刮刮樂
+      shuffleArray(scratchPool);
+      const chosenObj = scratchPool[0];
+
+      gameplaySection.innerHTML = `
+        <div style="font-size:14px; font-weight:bold; color:#38bdf8; margin-bottom:8px;">🎟️ 幸運刮刮樂挑戰</div>
+        <div class="scratch-card-box">
+          <div class="scratch-prize-layer">
+            ${chosenObj.img ? `<img src="${chosenObj.img}" style="max-height:80px; max-width:100px; object-fit:contain; margin-bottom:2px;" alt="獎品圖">` : ''}
+            <div id="prize-text-display" class="${chosenObj.name === '🐢' ? 'scratch-turtle-prize' : ''}" style="${chosenObj.name === '🐢' ? '' : 'font-size: 15px; color: #713f12; font-weight:900;'}">${chosenObj.name}</div>
           </div>
-          <button id="finish-scratch-btn" class="btn-primary btn-start" style="margin-top:12px; display:none;">✨ 領獎並確認完成挑戰</button>
-        `;
-        speakText('恭喜獲得刮刮樂');
+          <canvas id="scratch-canvas" class="scratch-canvas"></canvas>
+        </div>
+        <button id="finish-scratch-btn" class="btn-primary btn-start" style="margin-top:12px; display:none;">✨ 領獎並確認完成挑戰</button>
+      `;
+      speakText('恭喜獲得刮刮樂');
 
-        const canvas = document.getElementById('scratch-canvas');
-        const ctx = canvas.getContext('2d');
-        const box = document.querySelector('.scratch-card-box');
-        canvas.width = box.offsetWidth || 280;
-        canvas.height = box.offsetHeight || 160;
+      const canvas = document.getElementById('scratch-canvas');
+      const ctx = canvas.getContext('2d');
+      const box = document.querySelector('.scratch-card-box');
+      canvas.width = box.offsetWidth || 280;
+      canvas.height = box.offsetHeight || 160;
 
-        ctx.fillStyle = '#94a3b8';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#475569';
-        ctx.font = 'bold 16px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('⭐ 用力給它刮下去 ⭐', canvas.width / 2, canvas.height / 2 + 6);
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#475569';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('⭐ 用力給它刮下去 ⭐', canvas.width / 2, canvas.height / 2 + 6);
 
-        let isDrawing = false;
-        function scratch(x, y) {
-          ctx.globalCompositeOperation = 'destination-out';
-          ctx.beginPath();
-          ctx.arc(x, y, 22, 0, Math.PI * 2, false);
-          ctx.fill();
-          checkRevealPercentage();
+      let isDrawing = false;
+      function scratch(x, y) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        ctx.arc(x, y, 22, 0, Math.PI * 2, false);
+        ctx.fill();
+        checkRevealPercentage();
+      }
+
+      function getPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return { x: clientX - rect.left, y: clientY - rect.top };
+      }
+
+      canvas.addEventListener('mousedown', (e) => { isDrawing = true; const p = getPos(e); scratch(p.x, p.y); });
+      canvas.addEventListener('mousemove', (e) => { if (!isDrawing) return; const p = getPos(e); scratch(p.x, p.y); });
+      window.addEventListener('mouseup', () => { isDrawing = false; });
+      canvas.addEventListener('touchstart', (e) => { isDrawing = true; const p = getPos(e); scratch(p.x, p.y); e.preventDefault(); });
+      canvas.addEventListener('touchmove', (e) => { if (!isDrawing) return; const p = getPos(e); scratch(p.x, p.y); e.preventDefault(); });
+      window.addEventListener('touchend', () => { isDrawing = false; });
+
+      let checkedRevealed = false;
+      function checkRevealPercentage() {
+        if (checkedRevealed) return;
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let transparentPixels = 0;
+        const totalPixels = imgData.data.length / 4;
+        for (let i = 3; i < imgData.data.length; i += 4) {
+          if (imgData.data[i] === 0) transparentPixels++;
         }
-
-        function getPos(e) {
-          const rect = canvas.getBoundingClientRect();
-          const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-          const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-          return { x: clientX - rect.left, y: clientY - rect.top };
+        if (transparentPixels / totalPixels > 0.45) {
+          checkedRevealed = true;
+          canvas.style.transition = 'opacity 0.5s';
+          canvas.style.opacity = '0';
+          setTimeout(() => {
+            canvas.style.display = 'none';
+          }, 500);
+          document.getElementById('finish-scratch-btn').style.display = 'block';
+          speakText('刮出獎項了');
         }
+      }
 
-        canvas.addEventListener('mousedown', (e) => { isDrawing = true; const p = getPos(e); scratch(p.x, p.y); });
-        canvas.addEventListener('mousemove', (e) => { if (!isDrawing) return; const p = getPos(e); scratch(p.x, p.y); });
-        window.addEventListener('mouseup', () => { isDrawing = false; });
-        canvas.addEventListener('touchstart', (e) => { isDrawing = true; const p = getPos(e); scratch(p.x, p.y); e.preventDefault(); });
-        canvas.addEventListener('touchmove', (e) => { if (!isDrawing) return; const p = getPos(e); scratch(p.x, p.y); e.preventDefault(); });
-        window.addEventListener('touchend', () => { isDrawing = false; });
-
-        let checkedRevealed = false;
-        function checkRevealPercentage() {
-          if (checkedRevealed) return;
-          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          let transparentPixels = 0;
-          const totalPixels = imgData.data.length / 4;
-          for (let i = 3; i < imgData.data.length; i += 4) {
-            if (imgData.data[i] === 0) transparentPixels++;
-          }
-          if (transparentPixels / totalPixels > 0.45) {
-            checkedRevealed = true;
-            canvas.style.transition = 'opacity 0.5s';
-            canvas.style.opacity = '0';
-            setTimeout(() => {
-              canvas.style.display = 'none';
-            }, 500);
-            document.getElementById('finish-scratch-btn').style.display = 'block';
-            speakText('刮出獎項了');
-          }
-        }
-
-        document.getElementById('finish-scratch-btn').addEventListener('click', () => {
-          earnedPrizeText = chosenObj.name;
-          
-          // 計算總實體獎項數量上限
-          let totalRealPrizes = 0;
-          scratchCfg.prizes.forEach(p => totalRealPrizes += (p.qty || 1));
-
-          // 檢查若本次抽中實體獎項，是否已經達到總獎項發放上限，或者刮刮樂總張數已發完
-          // 若獎項已全數抽完，同步更新資料庫將整個活動標記為結束 (isEnded: true)
-          get(ref(db, `events_v1/${eventId}/scores`)).then((scoresSnap) => {
-            let allScores = scoresSnap.val() || {};
-            let currentRealClaimed = 0;
-            let totalPlayersFinished = Object.keys(allScores).length + 1;
-
-            Object.values(allScores).forEach(s => {
-              if (s && s.prize && s.prize !== '尚未刮獎' && s.prize !== '🐢') {
-                currentRealClaimed++;
-              }
-            });
-
-            if (chosenObj.name !== '🐢') {
-              currentRealClaimed++;
-            }
-
-            const shouldEndActivity = (currentRealClaimed >= totalRealPrizes) || (totalPlayersFinished >= totalCount);
-
-            update(ref(db, `events_v1/${eventId}`), {
-              [`scores/${playerId}`]: {
-                name: playerName,
-                passes: currentPassCount,
-                totalTime: totalElapsedTimeSec,
-                prize: earnedPrizeText,
-                timestamp: Date.now()
-              },
-              ...(shouldEndActivity ? { isEnded: true } : {})
-            }).then(() => {
-              endPersonalGame(false);
-              if (shouldEndActivity) {
-                alert('🎁 所有獎項已全數抽完！活動已自動終止。');
-              }
-            });
-          });
-        });
+      document.getElementById('finish-scratch-btn').addEventListener('click', () => {
+        earnedPrizeText = chosenObj.name;
+        updateScoreToFirebase();
+        endPersonalGame(false);
       });
     }
 
     function completeSubGameTask() {
       speakText('過關');
+
       currentPassCount++;
       document.getElementById('current-pass-display').innerText = currentPassCount;
       updateScoreToFirebase();
@@ -1377,7 +1357,7 @@
       document.getElementById('event-ended-view').classList.remove('hidden');
 
       const titleEl = document.querySelector('#event-ended-view h2');
-      if (titleEl) titleEl.innerText = isEventExpired ? '⏰ 活動時間到！' : '🎉 挑戰圓滿達成！';
+      if (titleEl) titleEl.innerText = isEventExpired ? '⏰ 活動時間到或獎項已抽完！' : '🎉 挑戰圓滿達成！';
 
       updateScoreToFirebase();
     }
@@ -1541,7 +1521,7 @@
       <button id="copy-score-btn" class="btn-primary btn-start" style="margin-top: 8px;">🏆 複製排行榜成績</button>
       
       <div class="leaderboard" style="margin-top: 12px;">
-        <div class="leaderboard-title">📊 即時排行榜 (時間制)</div>
+        <div class="leaderboard-title">📊 即時排行榜 </div>
         <div id="admin-leaderboard-list"></div>
       </div>
     </div>
