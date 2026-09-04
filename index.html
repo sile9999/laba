@@ -698,7 +698,7 @@
     function copyEventLink(btn) {
       if (!eventId) return;
       const fullLink = `${window.location.origin}${window.location.pathname}?event=${eventId}`;
-      navigator.clipboard.writeText(`🎮 花奶奶小物大挑戰\n🔗 連結：${fullLink}\n⏱️時間：\n📍 代號：${eventId}\n📓 備註：`).then(() => {
+      navigator.clipboard.writeText(`🎮 花奶奶小物大挑戰\n🔗 連結：${fullLink}\n⏱️ 時間：\n📍 代號：${eventId}\n📓 備註：`).then(() => {
         triggerButtonFeedback(btn, '✅ 已複製連結！', '📋 複製活動連結');
       });
     }
@@ -712,7 +712,7 @@
         return (a.totalTime ?? 999999) - (b.totalTime ?? 999999);
       });
       let text = `🏆【綜合益智大挑戰排行榜】\n`;
-      sorted.forEach((p, idx) => { text += `第 ${idx + 1} 名: @${p.name} - ${p.totalTime || 0}秒 ${p.prize ? ` [🏆 ${p.prize}]` : ''}\n`; });
+      sorted.forEach((p, idx) => { text += `第 ${idx + 1} 名: @${p.name} - ${p.totalTime || 0}秒 ${p.prize ? ` [${p.prize}]` : ''}\n`; });
       navigator.clipboard.writeText(text).then(() => {
         triggerButtonFeedback(btn, '✅ 已複製戰報！', '🏆 複製排行榜成績');
       });
