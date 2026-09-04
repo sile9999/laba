@@ -160,6 +160,33 @@
       position: absolute;
     }
 
+    /* 種菜賓賓樂專用樣式 */
+    .farm-tile {
+      background-color: #8d5524 !important;
+      border: 2px solid #5c3a21;
+      padding: 4px;
+    }
+    .farm-tile img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+    }
+    .farm-tile.marked { 
+      background: repeating-linear-gradient(45deg, #2e7d32, #2e7d32 10px, #1b5e20 10px, #1b5e20 20px) !important; 
+      border: 2px solid #81c784;
+      transform: scale(0.96); 
+      box-shadow: inset 0 2px 6px rgba(0,0,0,0.5); 
+    }
+    .farm-tile.marked img {
+      opacity: 0.3;
+    }
+    .farm-tile.marked::after {
+      content: '🌱';
+      font-size: 24px;
+      position: absolute;
+    }
+
     .mole-grid-container { position: relative; margin-bottom: 12px; border-radius: 8px; overflow: hidden; background: #3f6212; padding: 20px 8px 12px 8px; width: 100%; display: flex; justify-content: center; align-items: center; border: 4px solid #365314; box-shadow: inset 0 10px 20px rgba(0,0,0,0.3); }
     .mole-grid { display: flex; gap: 8px; justify-content: center; align-items: center; width: 100%; flex-wrap: wrap; position: relative; }
     .mole-tile { 
@@ -242,6 +269,7 @@
     .bingo-caller-box { background: linear-gradient(135deg, #1e3a8a, #3b82f6); color: white; border-radius: 12px; padding: 10px; margin-bottom: 10px; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); width: 100%; text-align: center; }
     .caller-title { font-size: 11px; opacity: 0.9; text-transform: uppercase; letter-spacing: 1px; }
     .current-number-display { font-size: 32px; font-weight: 900; line-height: 1.1; margin: 2px 0; color: #fde047; text-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    .current-img-display { width: 45px; height: 45px; object-fit: contain; vertical-align: middle; margin: 0 auto; display: inline-block; }
 
     @keyframes shake {
       0%, 100% { transform: translateX(0); }
@@ -289,6 +317,12 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
+
+    // 建立 2 到 100 的圖片陣列供種菜賓賓樂使用
+    const farmImageUrls = [];
+    for (let i = 2; i <= 100; i++) {
+      farmImageUrls.push(`https://cdn.jsdelivr.net/gh/sile9999/my-assets@main/images/farm (${i}).png`);
+    }
 
     let voices = [];
     function loadVoices() {
@@ -340,29 +374,27 @@
     // 子遊戲自訂設定物件
     let gameConfigs = {
       bingo: { size: 5, time: 60, callSpeed: 4000 },
+      farm: { size: 5, time: 60, callSpeed: 4000 },
       poker: { grid: 30, time: 60 },
       mole: { targetScore: 20, time: 60, popSpeed: 700 },
       scratch: {
-        totalCount: 10, // 刮刮樂總張數
+        totalCount: 10,
         prizes: [
           { name: '小禮物', qty: 1, img: '' }
         ]
       }
     };
 
-    const subGames = ['撲克牌對對碰', '賓果連線賽', '打地鼠'];
+    const subGames = ['撲克牌對對碰', '賓果連線賽', '打地鼠', '種菜賓賓樂'];
 
-    // 檢查活動是否已經結束（時間到 或 全部獎項已抽出）
     function checkEventEndedCondition(evData) {
       if (!evData) return false;
       const endTime = evData.endTime || 0;
       const isTimeUp = endTime && Date.now() >= endTime;
 
-      // 計算是否全部獎項已抽出
       let allPrizesTaken = false;
       if (evData.gameConfigs && evData.gameConfigs.scratch) {
         const scratchCfg = evData.gameConfigs.scratch;
-        const totalCount = scratchCfg.totalCount || 10;
         const scores = evData.scores || {};
         
         let takenCount = 0;
@@ -372,7 +404,6 @@
           }
         });
 
-        // 如果已抽出的非龜獎項數量大於或等於設定的總真實獎品數，視為獎項已全數抽完
         let totalRealPrizeQty = 0;
         if (scratchCfg.prizes) {
           scratchCfg.prizes.forEach(p => { totalRealPrizeQty += (p.qty || 1); });
@@ -397,8 +428,6 @@
       document.getElementById('start-slot-btn').addEventListener('click', spinSlotMachine);
 
       setupOptionGroup('pass-options', (val) => targetPassCount = parseInt(val));
-
-      // 刮刮樂總張數按鈕設定
       setupOptionGroup('scratch-total-count-options', (val) => gameConfigs.scratch.totalCount = parseInt(val));
 
       document.getElementById('add-prize-btn').addEventListener('click', () => {
@@ -408,10 +437,13 @@
 
       renderScratchPrizeRows();
 
-      // 子遊戲選項按鈕事件繫結
       setupOptionGroup('bingo-size-options', (val) => gameConfigs.bingo.size = parseInt(val));
       setupOptionGroup('bingo-time-options', (val) => gameConfigs.bingo.time = parseInt(val));
       setupOptionGroup('bingo-speed-options', (val) => gameConfigs.bingo.callSpeed = parseInt(val));
+
+      setupOptionGroup('farm-size-options', (val) => gameConfigs.farm.size = parseInt(val));
+      setupOptionGroup('farm-time-options', (val) => gameConfigs.farm.time = parseInt(val));
+      setupOptionGroup('farm-speed-options', (val) => gameConfigs.farm.callSpeed = parseInt(val));
 
       setupOptionGroup('poker-grid-options', (val) => gameConfigs.poker.grid = parseInt(val));
       setupOptionGroup('poker-time-options', (val) => gameConfigs.poker.time = parseInt(val));
@@ -466,7 +498,6 @@
         container.appendChild(row);
       });
 
-      // 繫結輸入事件與刪除事件
       container.querySelectorAll('input').forEach(input => {
         input.addEventListener('input', (e) => {
           const idx = parseInt(e.target.dataset.idx);
@@ -551,7 +582,6 @@
       const customVal = parseInt(document.getElementById('custom-pass-input').value);
       if (!isNaN(customVal) && customVal >= 1) targetPassCount = customVal;
 
-      // 讀取自訂刮刮樂總張數輸入框的值
       const customTotalCountInput = document.getElementById('custom-scratch-total-input').value.trim();
       if (customTotalCountInput !== '') {
         const parsedCount = parseInt(customTotalCountInput);
@@ -574,11 +604,20 @@
       const initialCallList = Array.from({ length: totalBingoCells }, (_, i) => i + 1);
       shuffleArray(initialCallList);
 
+      const farmSize = (gameConfigs.farm && gameConfigs.farm.size) ? gameConfigs.farm.size : 5;
+      const totalFarmCells = farmSize * farmSize;
+      
+      // 針對種菜賓賓樂產生隨機對應圖片池 (從 farmImageUrls 隨機抽取對應數量)
+      let shuffledFarmImages = [...farmImageUrls];
+      shuffleArray(shuffledFarmImages);
+      let initialFarmImagesList = shuffledFarmImages.slice(0, totalFarmCells);
+
       set(eventRef, {
         targetPassCount: targetPassCount,
         endTime: calculatedEndTimeMs,
         gameConfigs: gameConfigs,
         globalCallList: initialCallList,
+        globalFarmCallList: initialFarmImagesList,
         scores: {}
       }).then(() => {
         document.getElementById('room-num-display').innerText = eventId;
@@ -597,7 +636,7 @@
     function copyEventLink(btn) {
       if (!eventId) return;
       const fullLink = `${window.location.origin}${window.location.pathname}?event=${eventId}`;
-      navigator.clipboard.writeText(`🎮 花奶奶小物大挑戰\n🔗 連結：${fullLink}\n📍 代號：${eventId}\n📓 備註：`).then(() => {
+      navigator.clipboard.writeText(`🎮 花奶奶小物大挑戰\n🔗 連結：${fullLink}\n⏱️時間：\n📍 代號：${eventId}\n📓 備註：`).then(() => {
         triggerButtonFeedback(btn, '✅ 已複製連結！', '📋 複製活動連結');
       });
     }
@@ -649,7 +688,6 @@
           return;
         }
 
-        // 限制同一活動內玩家暱稱不可重複。
         const existingScores = data.scores || {};
         const duplicatedName = Object.values(existingScores).some(
           p => String(p && p.name || '').trim() === inputName
@@ -662,6 +700,7 @@
         targetPassCount = data.targetPassCount || 3;
         if (data.gameConfigs) gameConfigs = data.gameConfigs;
         if (data.globalCallList) globalCallList = data.globalCallList;
+        if (data.globalFarmCallList) globalFarmCallList = data.globalFarmCallList;
 
         document.getElementById('join-modal').classList.add('hidden');
         document.getElementById('main-setup-view').classList.add('hidden');
@@ -676,6 +715,7 @@
             }
             renderLeaderboard('player-leaderboard-list', evData.scores || {});
             if (evData.globalCallList) globalCallList = evData.globalCallList;
+            if (evData.globalFarmCallList) globalFarmCallList = evData.globalFarmCallList;
             if (evData.gameConfigs) gameConfigs = evData.gameConfigs;
           }
         });
@@ -725,6 +765,7 @@
 
     function showSlotMachineView() {
       if (bingoCallerTimer) clearInterval(bingoCallerTimer);
+      if (farmCallerTimer) clearInterval(farmCallerTimer);
       if (moleTimer) clearInterval(moleTimer);
       document.getElementById('slot-section').classList.remove('hidden');
       document.getElementById('gameplay-section').classList.add('hidden');
@@ -769,6 +810,8 @@
         startBingoSubGame();
       } else if (gameName === '打地鼠') {
         startMoleSubGame();
+      } else if (gameName === '種菜賓賓樂') {
+        startFarmSubGame();
       }
     }
 
@@ -1056,6 +1099,167 @@
       }
     }
 
+    // ---------------- 種菜賓賓樂 (修改為隨機圖片) ---------------- 
+    let globalFarmCallList = [];
+    let farmGridImages = [];
+    let farmMarkedIndices = new Set();
+    let farmTargetLines = 1;
+    let farmCompletedLines = 0;
+    let farmSubTimer = null;
+    let farmCallerTimer = null;
+    let farmCurrentDrawnImg = '';
+    let farmMatchStartTimestamp = 0;
+    let farmLastSpokenIndex = -1;
+
+    function startFarmSubGame() {
+      const cfg = gameConfigs.farm || { size: 5, time: 60, callSpeed: 4000 };
+      const N = cfg.size;
+      const totalCells = N * N;
+
+      farmMarkedIndices.clear();
+      farmCompletedLines = 0;
+      farmLastSpokenIndex = -1;
+      farmMatchStartTimestamp = Date.now();
+
+      const gameplaySection = document.getElementById('gameplay-section');
+      gameplaySection.innerHTML = `
+        <div style="display:flex; justify-content:space-between; width:100%; margin-bottom:4px; font-size:13px; color:#81c784;">
+          <span>🌻 種菜賓賓樂 (達 1 線)</span>
+          <span>限時: <strong id="farm-time-left">${cfg.time}</strong>s</span>
+        </div>
+        <div class="bingo-caller-box" style="background: linear-gradient(135deg, #2e7d32, #43a047);">
+          <div class="caller-title">目前播種目標</div>
+          <div class="current-number-display" id="farm-current-call"><span style="font-size: 14px; color:#fff;">請看下方目標</span></div>
+          <div style="font-size:11px; opacity:0.8;">請點擊與上方相同的蔬菜農地！</div>
+        </div>
+        <div class="grid-container">
+          <div id="farm-grid" class="grid" style="grid-template-columns: repeat(${N}, 1fr);"></div>
+        </div>
+      `;
+
+      let personalPool = [...globalFarmCallList];
+      if (personalPool.length < totalCells) {
+        personalPool = [...farmImageUrls];
+      }
+      shuffleArray(personalPool);
+      farmGridImages = personalPool.slice(0, totalCells);
+      renderFarmGrid();
+
+      farmMatchStartTimestamp = Date.now();
+      if (farmCallerTimer) clearInterval(farmCallerTimer);
+      updateFarmSynchronizedCall();
+      farmCallerTimer = setInterval(updateFarmSynchronizedCall, 200);
+
+      let timeLeft = cfg.time;
+      if (farmSubTimer) clearInterval(farmSubTimer);
+      farmSubTimer = setInterval(() => {
+        if (!isGameActive) {
+          clearInterval(farmSubTimer);
+          return;
+        }
+        timeLeft--;
+        const tEl = document.getElementById('farm-time-left');
+        if (tEl) tEl.innerText = timeLeft;
+        if (timeLeft <= 0) {
+          clearInterval(farmSubTimer);
+          clearInterval(farmCallerTimer);
+          alert('⏱️ 種菜賓賓樂遊戲時間到未達連線目標！');
+          showSlotMachineView();
+        }
+      }, 1000);
+    }
+
+    function updateFarmSynchronizedCall() {
+      if (!isGameActive) return;
+      const cfg = gameConfigs.farm || { callSpeed: 4000 };
+      const elapsed = Date.now() - farmMatchStartTimestamp;
+      const callIndex = Math.floor(elapsed / cfg.callSpeed);
+      if (globalFarmCallList && callIndex < globalFarmCallList.length) {
+        farmCurrentDrawnImg = globalFarmCallList[callIndex];
+        const callContainer = document.getElementById('farm-current-call');
+        if (callContainer) {
+          callContainer.innerHTML = `<img src="${farmCurrentDrawnImg}" class="current-img-display" alt="目標菜品">`;
+        }
+        if (callIndex !== farmLastSpokenIndex) {
+          farmLastSpokenIndex = callIndex;
+          speakText('請播種');
+        }
+      } else {
+        farmCurrentDrawnImg = '';
+      }
+    }
+
+    function renderFarmGrid() {
+      const gridEl = document.getElementById('farm-grid');
+      if (!gridEl) return;
+      gridEl.innerHTML = '';
+      farmGridImages.forEach((imgUrl, idx) => {
+        const tile = document.createElement('div');
+        let tileClass = 'tile farm-tile';
+        if (farmMarkedIndices.has(idx)) tileClass += ' marked';
+        tile.className = tileClass;
+        tile.innerHTML = `<img src="${imgUrl}" alt="菜品圖">`;
+        tile.onclick = () => handleFarmTileClick(idx);
+        gridEl.appendChild(tile);
+      });
+    }
+
+    function handleFarmTileClick(index) {
+      if (!isGameActive) return;
+      if (farmMarkedIndices.has(index)) return;
+      const clickedImg = farmGridImages[index];
+      if (clickedImg === farmCurrentDrawnImg) {
+        farmMarkedIndices.add(index);
+        checkFarmLines();
+        renderFarmGrid();
+      } else {
+        const tiles = document.querySelectorAll('#farm-grid .tile');
+        tiles[index]?.classList.add('error');
+        speakText('錯誤');
+        setTimeout(() => tiles[index]?.classList.remove('error'), 300);
+      }
+    }
+
+    function checkFarmLines() {
+      const N = (gameConfigs.farm && gameConfigs.farm.size) ? gameConfigs.farm.size : 5;
+      let linesFound = 0;
+      
+      for (let r = 0; r < N; r++) {
+        let rowComplete = true;
+        for (let c = 0; c < N; c++) {
+          if (!farmMarkedIndices.has(r * N + c)) rowComplete = false;
+        }
+        if (rowComplete) linesFound++;
+      }
+
+      for (let c = 0; c < N; c++) {
+        let colComplete = true;
+        for (let r = 0; r < N; r++) {
+          if (!farmMarkedIndices.has(r * N + c)) colComplete = false;
+        }
+        if (colComplete) linesFound++;
+      }
+
+      let diag1Complete = true;
+      for (let i = 0; i < N; i++) {
+        if (!farmMarkedIndices.has(i * N + i)) diag1Complete = false;
+      }
+      if (diag1Complete) linesFound++;
+
+      let diag2Complete = true;
+      for (let i = 0; i < N; i++) {
+        if (!farmMarkedIndices.has(i * N + (N - 1 - i))) diag2Complete = false;
+      }
+      if (diag2Complete) linesFound++;
+
+      farmCompletedLines = linesFound;
+      if (farmCompletedLines >= farmTargetLines) {
+        if (farmCallerTimer) clearInterval(farmCallerTimer);
+        if (farmSubTimer) clearInterval(farmSubTimer);
+        completeSubGameTask();
+      }
+    }
+
     // ---------------- 打地鼠 ---------------- 
     let moleTotalHoles = 12;
     let moleActiveIndex = -1;
@@ -1229,28 +1433,23 @@
       const gameplaySection = document.getElementById('gameplay-section');
       gameplaySection.classList.remove('hidden');
 
-      // 產生基於總張數與獎項數量的刮刮樂池
       let scratchPool = [];
       const scratchCfg = gameConfigs.scratch || { totalCount: 10, prizes: [] };
-      let assignedCount = 0;
 
       if (scratchCfg.prizes && scratchCfg.prizes.length > 0) {
         scratchCfg.prizes.forEach(p => {
           let q = p.qty || 1;
           for (let i = 0; i < q; i++) {
             scratchPool.push({ name: p.name, img: p.img || '' });
-            assignedCount++;
           }
         });
       }
 
-      // 如果總張數大於獎項數量，其餘未中獎的以🐢替代
       let totalCount = scratchCfg.totalCount || 10;
       while (scratchPool.length < totalCount) {
         scratchPool.push({ name: '🐢', img: '' });
       }
 
-      // 隨機抽出一張刮刮樂
       shuffleArray(scratchPool);
       const chosenObj = scratchPool[0];
 
@@ -1350,6 +1549,8 @@
       if (mainTimer) clearInterval(mainTimer);
       if (bingoSubTimer) clearInterval(bingoSubTimer);
       if (bingoCallerTimer) clearInterval(bingoCallerTimer);
+      if (farmSubTimer) clearInterval(farmSubTimer);
+      if (farmCallerTimer) clearInterval(farmCallerTimer);
       if (moleTimer) clearInterval(moleTimer);
       if (moleSubTimer) clearInterval(moleSubTimer);
 
@@ -1445,6 +1646,28 @@
         </div>
         <div style="font-size: 13px; color: #475569; margin-bottom: 4px;">叫號速度：</div>
         <div class="btn-group" id="bingo-speed-options">
+          <button class="btn-option" data-val="3000">快 (3秒)</button>
+          <button class="btn-option active" data-val="4000">中 (4秒)</button>
+          <button class="btn-option" data-val="5000">慢 (5秒)</button>
+        </div>
+      </div>
+
+      <div class="subgame-setting-box">
+        <div class="subgame-setting-title">🌻 種菜賓賓樂設定</div>
+        <div style="font-size: 13px; color: #475569; margin-bottom: 4px;">農地尺寸：</div>
+        <div class="btn-group" id="farm-size-options" style="margin-bottom: 8px;">
+          <button class="btn-option" data-val="4">4x4 (16格)</button>
+          <button class="btn-option active" data-val="5">5x5 (25格)</button>
+          <button class="btn-option" data-val="6">6x6 (36格)</button>
+        </div>
+        <div style="font-size: 13px; color: #475569; margin-bottom: 4px;">子遊戲限時：</div>
+        <div class="btn-group" id="farm-time-options" style="margin-bottom: 8px;">
+          <button class="btn-option" data-val="30">30 秒</button>
+          <button class="btn-option active" data-val="60">60 秒</button>
+          <button class="btn-option" data-val="90">90 秒</button>
+        </div>
+        <div style="font-size: 13px; color: #475569; margin-bottom: 4px;">播種速度：</div>
+        <div class="btn-group" id="farm-speed-options">
           <button class="btn-option" data-val="3000">快 (3秒)</button>
           <button class="btn-option active" data-val="4000">中 (4秒)</button>
           <button class="btn-option" data-val="5000">慢 (5秒)</button>
