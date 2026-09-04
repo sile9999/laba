@@ -577,8 +577,8 @@
         if (passesB !== passesA) return passesB - passesA;
         return (a.totalTime ?? 999999) - (b.totalTime ?? 999999);
       });
-      let text = `🏆【綜合益智大挑戰排行榜 (時間制)】\n`;
-      sorted.forEach((p, idx) => { text += `第 ${idx + 1} 名: ${p.name} - 通關 ${p.passes || 0}次 (花費 ${p.totalTime || 0} 秒)${p.prize ? ` [獲得獎項: ${p.prize}]` : ''}\n`; });
+      let text = `🏆【綜合益智大挑戰排行榜】\n`;
+      sorted.forEach((p, idx) => { text += `第 ${idx + 1} 名: @${p.name} - 通關 ${p.passes || 0}次 ${p.prize ? ` [獎項: ${p.prize}]` : ''}\n`; });
       navigator.clipboard.writeText(text).then(() => {
         triggerButtonFeedback(btn, '✅ 已複製戰報！', '🏆 複製排行榜成績');
       });
