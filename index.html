@@ -303,7 +303,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue, update, get } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+    import { getDatabase, ref, set, onValue, update, get, runTransaction } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyDfajfgTmrYRSo7lyRa4j23rsODFzFZSRY",
@@ -395,21 +395,39 @@
       let allPrizesTaken = false;
       if (evData.gameConfigs && evData.gameConfigs.scratch) {
         const scratchCfg = evData.gameConfigs.scratch;
-        const scores = evData.scores || {};
-        
-        let takenCount = 0;
-        Object.values(scores).forEach(p => {
-          if (p && p.prize && p.prize !== '尚未刮獎' && p.prize !== '🐢') {
-            takenCount++;
-          }
-        });
-
         let totalRealPrizeQty = 0;
         if (scratchCfg.prizes) {
           scratchCfg.prizes.forEach(p => { totalRealPrizeQty += (p.qty || 1); });
         }
-        if (totalRealPrizeQty > 0 && takenCount >= totalRealPrizeQty) {
-          allPrizesTaken = true;
+
+        // 新版使用共用刮刮樂牌堆，但「領到牌」不等於「已刮完」。
+        // 必須等玩家按下「領獎並確認完成挑戰」後，該張獎項才算真正完成，
+        // 避免最後一張獎項剛被領取、玩家還沒刮開時，其他玩家就被判定活動結束。
+        if (evData.scratchState && Array.isArray(evData.scratchState.deck)) {
+          if (totalRealPrizeQty > 0) {
+            const claims = evData.scratchState.claims || {};
+            let completedPrizeQty = 0;
+            Object.values(claims).forEach(claim => {
+              if (claim && claim.isPrize === true && claim.completed === true) {
+                completedPrizeQty++;
+              }
+            });
+            if (completedPrizeQty >= totalRealPrizeQty) {
+              allPrizesTaken = true;
+            }
+          }
+        } else {
+          // 相容舊活動：保留原本以排行榜獎項紀錄判斷的方式。
+          const scores = evData.scores || {};
+          let takenCount = 0;
+          Object.values(scores).forEach(p => {
+            if (p && p.prize && p.prize !== '尚未刮獎' && p.prize !== '🐢') {
+              takenCount++;
+            }
+          });
+          if (totalRealPrizeQty > 0 && takenCount >= totalRealPrizeQty) {
+            allPrizesTaken = true;
+          }
         }
       }
 
@@ -578,6 +596,40 @@
       }
     }
 
+    function buildScratchDeck(scratchCfg) {
+      const cfg = scratchCfg || { totalCount: 10, prizes: [] };
+      const totalCount = Math.max(1, Number(cfg.totalCount) || 10);
+      const deck = [];
+
+      (cfg.prizes || []).forEach(p => {
+        const qty = Math.max(0, Number(p.qty) || 0);
+        for (let i = 0; i < qty; i++) {
+          deck.push({
+            name: p.name || '',
+            img: p.img || '',
+            isPrize: true
+          });
+        }
+      });
+
+      // 刮刮樂總張數固定以 totalCount 為準；獎項不足的部分補🐢。
+      // 若獎項總數超過總張數，直接阻止建立活動，避免設定值彼此矛盾。
+      if (deck.length > totalCount) {
+        return { error: `目前獎項總數為 ${deck.length} 張，但刮刮樂總張數只有 ${totalCount} 張。請將獎項數量調整為不超過總張數。` };
+      }
+
+      while (deck.length < totalCount) {
+        deck.push({
+          name: '🐢',
+          img: '',
+          isPrize: false
+        });
+      }
+
+      shuffleArray(deck);
+      return { deck, totalCount };
+    }
+
     function createEvent() {
       const customVal = parseInt(document.getElementById('custom-pass-input').value);
       if (!isNaN(customVal) && customVal >= 1) targetPassCount = customVal;
@@ -588,6 +640,11 @@
         if (!isNaN(parsedCount) && parsedCount >= 1) {
           gameConfigs.scratch.totalCount = parsedCount;
         }
+      }
+
+      const scratchDeckResult = buildScratchDeck(gameConfigs.scratch);
+      if (scratchDeckResult.error) {
+        return alert(`⚠️ ${scratchDeckResult.error}`);
       }
 
       endTimeStr = document.getElementById('admin-endtime-input').value;
@@ -618,6 +675,11 @@
         gameConfigs: gameConfigs,
         globalCallList: initialCallList,
         globalFarmCallList: initialFarmImagesList,
+        scratchState: {
+          deck: scratchDeckResult.deck,
+          nextIndex: 0,
+          claims: {}
+        },
         scores: {}
       }).then(() => {
         document.getElementById('room-num-display').innerText = eventId;
@@ -650,7 +712,7 @@
         return (a.totalTime ?? 999999) - (b.totalTime ?? 999999);
       });
       let text = `🏆【綜合益智大挑戰排行榜】\n`;
-      sorted.forEach((p, idx) => { text += `第 ${idx + 1} 名: @${p.name} - 花費 ${p.totalTime || 0} 秒 ${p.prize ? ` [獎項: ${p.prize}]` : ''}\n`; });
+      sorted.forEach((p, idx) => { text += `第 ${idx + 1} 名: @${p.name} - ${p.totalTime || 0}秒 ${p.prize ? ` [🏆 ${p.prize}]` : ''}\n`; });
       navigator.clipboard.writeText(text).then(() => {
         triggerButtonFeedback(btn, '✅ 已複製戰報！', '🏆 複製排行榜成績');
       });
@@ -725,8 +787,8 @@
     }
 
     function updateScoreToFirebase() {
-      if (!eventId || !playerId) return;
-      update(ref(db, `events_v1/${eventId}/scores/${playerId}`), {
+      if (!eventId || !playerId) return Promise.resolve();
+      return update(ref(db, `events_v1/${eventId}/scores/${playerId}`), {
         name: playerName,
         passes: currentPassCount,
         totalTime: totalElapsedTimeSec,
@@ -1427,31 +1489,106 @@
     }
 
     // ---------------- 幸運刮刮樂關卡 ---------------- 
-    function startScratchCardGame() {
+    async function claimScratchCard() {
+      if (!eventId || !playerId) return null;
+
+      const scratchStateRef = ref(db, `events_v1/${eventId}/scratchState`);
+      let claimedCard = null;
+
+      try {
+        const result = await runTransaction(scratchStateRef, (currentState) => {
+          let state = currentState;
+
+          // 相容修正版上線前建立的舊活動：第一次有人刮時建立共用牌堆。
+          if (!state || !Array.isArray(state.deck)) {
+            const built = buildScratchDeck(gameConfigs.scratch);
+            if (built.error) return;
+            state = {
+              deck: built.deck,
+              nextIndex: 0,
+              claims: {}
+            };
+          }
+
+          state.claims = state.claims || {};
+
+          // 同一玩家因重複點擊或網路重送，不會再領第二張。
+          if (state.claims[playerId]) {
+            claimedCard = state.claims[playerId];
+            return state;
+          }
+
+          const nextIndex = Math.max(0, Number(state.nextIndex) || 0);
+          if (nextIndex >= state.deck.length) {
+            return state;
+          }
+
+          const card = state.deck[nextIndex];
+          claimedCard = {
+            name: card && card.name ? card.name : '🐢',
+            img: card && card.img ? card.img : '',
+            isPrize: card && card.isPrize === true,
+            index: nextIndex
+          };
+
+          state.claims[playerId] = claimedCard;
+          state.nextIndex = nextIndex + 1;
+          return state;
+        });
+
+        if (!result.committed || !claimedCard) {
+          return null;
+        }
+
+        return claimedCard;
+      } catch (error) {
+        console.error('刮刮樂發放失敗：', error);
+        alert('⚠️ 刮刮樂發放失敗，請重新嘗試。');
+        return null;
+      }
+    }
+
+    async function completeScratchCardClaim() {
+      if (!eventId || !playerId) return false;
+
+      const scratchStateRef = ref(db, `events_v1/${eventId}/scratchState`);
+      try {
+        const result = await runTransaction(scratchStateRef, (state) => {
+          if (!state || !state.claims || !state.claims[playerId]) {
+            return;
+          }
+
+          const claim = state.claims[playerId];
+          if (claim.completed === true) {
+            return state;
+          }
+
+          state.claims[playerId] = { ...claim, completed: true };
+          return state;
+        });
+
+        return !!result.committed;
+      } catch (error) {
+        console.error('刮刮樂完成狀態更新失敗：', error);
+        return false;
+      }
+    }
+
+    async function startScratchCardGame() {
       if (mainTimer) clearInterval(mainTimer);
       document.getElementById('slot-section').classList.add('hidden');
       const gameplaySection = document.getElementById('gameplay-section');
       gameplaySection.classList.remove('hidden');
 
-      let scratchPool = [];
-      const scratchCfg = gameConfigs.scratch || { totalCount: 10, prizes: [] };
+      // 修正：不再由每位玩家在本機重新建立/洗牌 scratchPool。
+      // 所有玩家共用 Firebase 活動牌堆，並透過 transaction 原子領取一張。
+      const chosenObj = await claimScratchCard();
 
-      if (scratchCfg.prizes && scratchCfg.prizes.length > 0) {
-        scratchCfg.prizes.forEach(p => {
-          let q = p.qty || 1;
-          for (let i = 0; i < q; i++) {
-            scratchPool.push({ name: p.name, img: p.img || '' });
-          }
-        });
+      if (!chosenObj) {
+        alert('🎟️ 刮刮樂已全部發放完畢！');
+        endPersonalGame(true);
+        return;
       }
-
-      let totalCount = scratchCfg.totalCount || 10;
-      while (scratchPool.length < totalCount) {
-        scratchPool.push({ name: '🐢', img: '' });
-      }
-
-      shuffleArray(scratchPool);
-      const chosenObj = scratchPool[0];
 
       gameplaySection.innerHTML = `
         <div style="font-size:14px; font-weight:bold; color:#38bdf8; margin-bottom:8px;">🎟️ 幸運刮刮樂挑戰</div>
@@ -1523,9 +1660,21 @@
         }
       }
 
-      document.getElementById('finish-scratch-btn').addEventListener('click', () => {
+      document.getElementById('finish-scratch-btn').addEventListener('click', async () => {
+        const finishBtn = document.getElementById('finish-scratch-btn');
+        if (finishBtn.disabled) return;
+        finishBtn.disabled = true;
+
         earnedPrizeText = chosenObj.name;
-        updateScoreToFirebase();
+        await updateScoreToFirebase();
+        const completed = await completeScratchCardClaim();
+
+        if (!completed) {
+          finishBtn.disabled = false;
+          alert('⚠️ 刮刮樂完成狀態更新失敗，請再按一次。');
+          return;
+        }
+
         endPersonalGame(false);
       });
     }
