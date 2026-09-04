@@ -564,7 +564,7 @@
     function copyEventLink(btn) {
       if (!eventId) return;
       const fullLink = `${window.location.origin}${window.location.pathname}?event=${eventId}`;
-      navigator.clipboard.writeText(`🎮 綜合益智大挑戰\n🔗 連結：${fullLink}\n📍 代號：${eventId}`).then(() => {
+      navigator.clipboard.writeText(`🎮 花奶奶小物大挑戰\n🔗 連結：${fullLink}\n📍 代號：${eventId}\n📓 備註：`).then(() => {
         triggerButtonFeedback(btn, '✅ 已複製連結！', '📋 複製活動連結');
       });
     }
